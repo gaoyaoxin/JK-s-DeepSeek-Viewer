@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JK's DeepSeek ViewerJSON - 深度求索会话查看器</title>
+    <title>JK's DeepSeek Viewer - 深度求索会话查看器</title>
     <style>
         * {
             margin: 0;
@@ -116,6 +116,27 @@
             border-color: #10a37f;
         }
         
+        /* 新增搜索选项样式 */
+        .search-options {
+            margin-top: 10px;
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: #2c3e50;
+        }
+        
+        .search-options label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+        }
+        
+        .search-options input[type="radio"] {
+            cursor: pointer;
+            accent-color: #10a37f;
+        }
+        
         .conversation-info {
             padding: 10px 20px;
             background: #f8f9fa;
@@ -196,6 +217,61 @@
         .content-meta {
             color: #6c757d;
             font-size: 14px;
+            margin-bottom: 15px; /* 给示意图留空间 */
+        }
+
+        /* 分支示意图样式 */
+        .branch-diagram {
+            background: #f0f7ff;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-top: 10px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            border: 1px solid #d0e0f0;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        .branch-diagram .path-row {
+            margin: 4px 0;
+            color: #2c3e50;
+        }
+        .branch-diagram .node-tag {
+            display: inline-block;
+            background: #e3f2fd;
+            border-radius: 12px;
+            padding: 2px 10px;
+            margin: 0 2px;
+            border: 1px solid #90caf9;
+            font-weight: 500;
+        }
+        .node-tag.duplicate {
+            color: transparent !important;
+            /* 保留背景色和边框，仅文字透明 */
+        }
+        .branch-diagram .arrow {
+            margin: 0 4px;
+            color: #90a4ae;
+        }
+        .branch-toggle-btn {
+            margin-top: 8px;
+            background: #10a37f;
+            color: white;
+            border: none;
+            border-radius: 16px;
+            padding: 4px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            display: inline-block;
+        }
+        .branch-toggle-btn:hover {
+            background: #0d8c6d;
+        }
+        .branch-folded, .branch-expanded {
+            transition: all 0.2s;
+        }
+        .branch-expanded {
+            display: none;
         }
         
         .messages-container {
@@ -206,7 +282,7 @@
         }
         
         .message {
-            margin-bottom: 25px;
+            margin-bottom: 5px;
             padding: 20px;
             border-radius: 12px;
             position: relative;
@@ -216,6 +292,7 @@
         .message-think {
             background: #f8f9fa;
             border-left: 4px solid #6c757d;
+            margin-bottom: 0px;
         }
         
         .message-response {
@@ -226,6 +303,7 @@
         .message-request {
             background: #e8f5e8;
             border-left: 4px solid #2e7d32;
+            margin-top: 50px;
         }
         
         .message-header {
@@ -235,9 +313,11 @@
             margin-bottom: 10px;
             font-size: 12px;
             color: #6c757d;
+            gap: 8px;
+            flex-wrap: wrap;
         }
         
-        .message-type {
+        .message-type, .message-id {
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -245,9 +325,14 @@
             border-radius: 4px;
             background: rgba(0,0,0,0.1);
         }
+        .message-id {
+            background: rgba(16, 163, 127, 0.15); /* 轻微区分 */
+            margin-left: 4px;
+        }
         
         .message-time {
             font-size: 11px;
+            margin-left: auto; /* 确保靠右 */
         }
         
         .message-content {
@@ -392,7 +477,7 @@
         <!-- 侧边栏 -->
         <div class="sidebar">
             <div class="sidebar-header">
-                <h1>JK's DeepSeek Viewer深度求索会话查看器</h1>
+                <h1>JK's DeepSeek Viewer - 深度求索会话查看器</h1>
                 
                 <!-- 上传区域 -->
                 <div class="upload-section">
@@ -408,7 +493,16 @@
             </div>
             
             <div class="search-box">
-                <input type="text" id="searchInput" placeholder="搜索对话标题、内容或时间（如2025-10-01）...">
+                <input type="text" id="searchInput" placeholder="搜索对话标题、内容或时间...">
+                <!-- 新增搜索范围选项 -->
+                <div class="search-options">
+                    <label>
+                        <input type="radio" name="searchMode" value="title" checked> 标题/预览
+                    </label>
+                    <label>
+                        <input type="radio" name="searchMode" value="full"> 全文搜索
+                    </label>
+                </div>
             </div>
             
             <div class="conversation-info" id="conversationInfo">
@@ -451,6 +545,7 @@
         let conversationsData = [];
         let currentConversationId = null;
         let currentFileName = '';
+        let conversationMap = new Map(); // ID到对话对象的映射，用于快速查找
         
         // DOM 元素
         const fileInput = document.getElementById('fileInput');
@@ -463,6 +558,9 @@
         const messagesContainer = document.getElementById('messagesContainer');
         const loadingIndicator = document.getElementById('loadingIndicator');
         
+        // 防抖定时器
+        let searchTimeout = null;
+        
         // 文件上传处理
         fileInput.addEventListener('change', handleFileUpload);
         
@@ -470,12 +568,10 @@
             const file = event.target.files[0];
             if (!file) return;
             
-            // 显示文件名
             currentFileName = file.name;
             fileNameElement.textContent = currentFileName;
             currentFileElement.style.display = 'block';
             
-            // 显示加载状态
             loadingIndicator.classList.add('active');
             conversationList.innerHTML = '';
             
@@ -501,11 +597,10 @@
             reader.readAsText(file);
         }
         
+        // 处理JSON数据
         function processJSONData(data) {
             try {
-                // 检查数据格式
                 if (!Array.isArray(data)) {
-                    // 尝试查找对话数组
                     if (data.conversations && Array.isArray(data.conversations)) {
                         data = data.conversations;
                     } else if (data.data && Array.isArray(data.data)) {
@@ -515,21 +610,37 @@
                     }
                 }
                 
-                // 按时间排序对话
+                // 按时间排序，并为每个对话生成唯一ID
                 conversationsData = data.sort((a, b) => {
                     const timeA = a.inserted_at || a.created_at || '';
                     const timeB = b.inserted_at || b.created_at || '';
                     return new Date(timeB) - new Date(timeA);
+                }).map((conv, index) => {
+                    // 确保每个对话都有唯一ID
+                    if (!conv.id && !conv.conversation_id) {
+                        conv.id = `conv_${index}`;
+                    } else {
+                        conv.id = conv.id || conv.conversation_id;
+                    }
+                    return conv;
                 });
                 
-                // 更新对话信息
+                // 预计算全文搜索文本（小写，不区分大小写）
+                conversationsData.forEach(conv => {
+                    conv._fullText = buildFullText(conv).toLowerCase();
+                });
+                
+                // 建立ID到对话的映射，用于快速查找
+                conversationMap = new Map(conversationsData.map(conv => [conv.id, conv]));
+                
                 conversationInfo.innerHTML = `共 ${conversationsData.length} 个对话`;
                 
-                // 生成对话列表
                 if (conversationsData.length > 0) {
                     renderConversationList();
+                    // 应用当前搜索条件
+                    filterConversations();
                     // 默认显示第一个对话
-                    showConversation(conversationsData[0].id || conversationsData[0].conversation_id || '0');
+                    showConversation(conversationsData[0].id);
                 } else {
                     conversationList.innerHTML = '<div class="empty-state"><h3>没有找到对话</h3><p>JSON文件中没有对话数据</p></div>';
                 }
@@ -539,22 +650,61 @@
             }
         }
         
+        // 构建全文搜索文本（提取所有消息内容、文件名、文件内容等）
+        function buildFullText(conv) {
+            const texts = [];
+            
+            // 添加标题（如果存在）
+            if (conv.title) texts.push(conv.title);
+            
+            if (conv.mapping) {
+                const nodes = extractMessagesFromMapping(conv.mapping);
+                nodes.forEach(node => {
+                    if (node.message) addMessageText(node.message, texts);
+                });
+            } else if (conv.messages) {
+                conv.messages.forEach(msg => addMessageText(msg, texts));
+            } else if (conv.content) {
+                texts.push(conv.content);
+            }
+            
+            return texts.join(' ');
+        }
+        
+        // 从消息对象中提取文本
+        function addMessageText(msg, texts) {
+            if (msg.content) texts.push(msg.content);
+            if (msg.fragments) {
+                msg.fragments.forEach(f => {
+                    if (f.content) texts.push(f.content);
+                });
+            }
+            if (msg.text) texts.push(msg.text);
+            if (msg.files) {
+                msg.files.forEach(f => {
+                    if (f.file_name) texts.push(f.file_name);
+                    if (f.content) texts.push(f.content);
+                });
+            }
+            // 可能还有其它字段，根据需要添加
+        }
+        
+        // 渲染对话列表
         function renderConversationList() {
             let listHTML = '';
             
             conversationsData.forEach((conv, index) => {
-                const convId = conv.id || conv.conversation_id || index;
                 const title = conv.title || conv.name || `对话 ${index + 1}`;
                 const insertedAt = conv.inserted_at || conv.created_at || conv.timestamp || '';
                 const preview = extractPreview(conv);
                 
                 listHTML += `
                     <div class="conversation-item" 
-                         data-id="${convId}" 
+                         data-id="${conv.id}" 
                          data-title="${escapeHTML(title)}"
                          data-preview="${escapeHTML(preview)}"
                          data-datetime="${escapeHTML(insertedAt)}"
-                         onclick="showConversation('${convId}')">
+                         onclick="showConversation('${conv.id}')">
                         <div class="conversation-title">${escapeHTML(title)}</div>
                         <div class="conversation-date">${formatDateTime(insertedAt)}</div>
                         <div class="conversation-preview">${escapeHTML(preview)}</div>
@@ -565,13 +715,13 @@
             conversationList.innerHTML = listHTML;
         }
         
+        // 提取预览（保持不变）
         function extractPreview(conversation) {
             if (conversation.preview || conversation.last_message) {
                 return conversation.preview || conversation.last_message;
             }
             
             if (conversation.mapping) {
-                // 查找第一个非空消息
                 for (const key in conversation.mapping) {
                     const node = conversation.mapping[key];
                     if (node && node.message && node.message.content) {
@@ -592,124 +742,7 @@
             return '无内容预览';
         }
         
-        // 搜索功能
-        searchInput.addEventListener('input', function(e) {
-            filterConversations();
-        });
-        
-        function filterConversations() {
-            const searchTerm = searchInput.value.toLowerCase();
-            const items = conversationList.getElementsByClassName('conversation-item');
-            
-            for (let item of items) {
-                const title = item.getAttribute('data-title').toLowerCase();
-                const preview = item.getAttribute('data-preview').toLowerCase();
-                const dateTime = item.getAttribute('data-datetime').toLowerCase();
-                
-                const matchesSearch = !searchTerm || 
-                    title.includes(searchTerm) || 
-                    preview.includes(searchTerm) ||
-                    dateTime.includes(searchTerm);
-                
-                item.style.display = matchesSearch ? 'block' : 'none';
-            }
-        }
-        
-        // 显示对话详情
-        function showConversation(conversationId) {
-            if (currentConversationId === conversationId) return;
-            
-            // 更新活跃状态
-            document.querySelectorAll('.conversation-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            const selectedItem = document.querySelector(`[data-id="${conversationId}"]`);
-            if (selectedItem) {
-                selectedItem.classList.add('active');
-            }
-            
-            currentConversationId = conversationId;
-            
-            // 显示加载指示器
-            loadingIndicator.classList.add('active');
-            
-            // 查找对话
-            const conversation = conversationsData.find(conv => 
-                (conv.id === conversationId) || 
-                (conv.conversation_id === conversationId)
-            );
-            
-            if (conversation) {
-                setTimeout(() => {
-                    renderConversation(conversation);
-                    loadingIndicator.classList.remove('active');
-                }, 100);
-            } else {
-                // 如果没找到，尝试用索引
-                const index = parseInt(conversationId);
-                if (!isNaN(index) && conversationsData[index]) {
-                    setTimeout(() => {
-                        renderConversation(conversationsData[index]);
-                        loadingIndicator.classList.remove('active');
-                    }, 100);
-                } else {
-                    showError('找不到指定的对话');
-                    loadingIndicator.classList.remove('active');
-                }
-            }
-        }
-        
-        // 渲染对话详情
-        function renderConversation(conversation) {
-            // 更新头部
-            const insertedAt = formatDateTimeFull(conversation.inserted_at || conversation.created_at);
-            const updatedAt = formatDateTimeFull(conversation.updated_at || conversation.modified_at || conversation.inserted_at);
-            const title = conversation.title || conversation.name || '无标题对话';
-            const convId = conversation.id || conversation.conversation_id || '未知';
-            
-            contentHeader.innerHTML = `
-                <h2>${escapeHTML(title)}</h2>
-                <div class="content-meta">
-                    <div>创建时间: ${insertedAt}</div>
-                    <div>更新时间: ${updatedAt}</div>
-                    <div>ID: ${convId}</div>
-                </div>
-            `;
-            
-            // 渲染消息
-            messagesContainer.innerHTML = '';
-            
-            if (conversation.mapping) {
-                renderMappingMessages(conversation.mapping);
-            } else if (conversation.messages) {
-                renderSimpleMessages(conversation.messages);
-            } else if (conversation.content) {
-                // 直接显示内容
-                renderContent(conversation);
-            } else {
-                messagesContainer.innerHTML = '<div class="empty-state"><h3>无消息内容</h3><p>此对话没有可显示的消息</p></div>';
-            }
-            
-            // 滚动到顶部
-            messagesContainer.scrollTop = 0;
-        }
-        
-        function renderMappingMessages(mapping) {
-            const messages = extractMessagesFromMapping(mapping);
-            
-            if (messages.length === 0) {
-                messagesContainer.innerHTML = '<div class="empty-state"><h3>无消息内容</h3><p>mapping结构中没有找到消息</p></div>';
-                return;
-            }
-            
-            messages.forEach(messageNode => {
-                if (messageNode.message) {
-                    const messageElement = createMessageElement(messageNode.message);
-                    messagesContainer.appendChild(messageElement);
-                }
-            });
-        }
-        
+        // 从mapping中提取所有消息节点（复用原有函数）
         function extractMessagesFromMapping(mapping) {
             const messages = [];
             
@@ -728,12 +761,10 @@
                 }
             }
             
-            // 尝试找到根节点
             const rootKey = Object.keys(mapping).find(key => key === 'root' || mapping[key].parent === null);
             if (rootKey) {
                 traverse(rootKey);
             } else {
-                // 如果没有找到根节点，遍历所有节点
                 Object.keys(mapping).forEach(key => {
                     const node = mapping[key];
                     if (node && node.message) {
@@ -745,9 +776,273 @@
             return messages;
         }
         
+        // 搜索输入事件（带防抖）
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                filterConversations();
+            }, 300);
+        });
+        
+        // 搜索模式切换事件
+        document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                filterConversations();
+            });
+        });
+        
+        // 过滤对话列表
+        function filterConversations() {
+            // 如果没有对话数据，直接返回（保持原有提示）
+            if (conversationsData.length === 0) return;
+
+            const searchTerm = searchInput.value.trim().toLowerCase();
+            const mode = document.querySelector('input[name="searchMode"]:checked').value;
+            const items = conversationList.getElementsByClassName('conversation-item');
+            
+            let visibleCount = 0;
+
+            for (let item of items) {
+                const title = item.getAttribute('data-title').toLowerCase();
+                const preview = item.getAttribute('data-preview').toLowerCase();
+                const dateTime = item.getAttribute('data-datetime').toLowerCase();
+
+                let matches = false;
+
+                if (mode === 'title') {
+                    // 仅搜索标题、预览、时间
+                    matches = !searchTerm || title.includes(searchTerm) || preview.includes(searchTerm) || dateTime.includes(searchTerm);
+                } else {
+                    // 全文搜索：标题、预览、时间 + 全文内容
+                    const convId = item.getAttribute('data-id');
+                    const conversation = conversationMap.get(convId);
+                    const fullText = conversation ? conversation._fullText : '';
+                    matches = !searchTerm || title.includes(searchTerm) || preview.includes(searchTerm) || dateTime.includes(searchTerm) || (fullText && fullText.includes(searchTerm));
+                }
+
+                item.style.display = matches ? 'block' : 'none';
+                if (matches) visibleCount++;
+            }
+
+            // 更新对话信息：显示总数和搜索结果数
+            const total = conversationsData.length;
+            conversationInfo.innerHTML = `共 ${total} 个对话，搜索结果 ${visibleCount} 个`;
+        }
+        
+        // 显示对话详情
+        function showConversation(conversationId) {
+            if (currentConversationId === conversationId) return;
+            
+            document.querySelectorAll('.conversation-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            const selectedItem = document.querySelector(`[data-id="${conversationId}"]`);
+            if (selectedItem) {
+                selectedItem.classList.add('active');
+            }
+            
+            currentConversationId = conversationId;
+            loadingIndicator.classList.add('active');
+            
+            const conversation = conversationMap.get(conversationId);
+            
+            if (conversation) {
+                setTimeout(() => {
+                    renderConversation(conversation);
+                    loadingIndicator.classList.remove('active');
+                }, 100);
+            } else {
+                showError('找不到指定的对话');
+                loadingIndicator.classList.remove('active');
+            }
+        }
+        
+        // ---------- 新增：根据节点获取类型缩写 ----------
+        function getNodeTypeAbbr(node) {
+            if (!node || !node.message || !node.message.fragments) return '?';
+            const fragments = node.message.fragments;
+            const types = new Set(fragments.map(f => f.type));
+            if (types.has('THINK') && types.has('RESPONSE')) return '思答';
+            if (types.has('THINK')) return '思';
+            if (types.has('RESPONSE')) return '答';
+            if (types.has('REQUEST')) return '问';
+            return '?';
+        }
+
+        // ---------- 新增：从mapping构建所有根到叶子的路径 ----------
+        function buildPathsFromMapping(mapping) {
+            const paths = [];
+            const root = mapping['root'];
+            if (!root || !root.children) return paths;
+
+            function dfs(nodeId, currentPath) {
+                const node = mapping[nodeId];
+                if (!node) return;
+                const abbr = node.message ? getNodeTypeAbbr(node) : '';
+                const newPath = [...currentPath, { id: nodeId, abbr }];
+                if (node.children && node.children.length > 0) {
+                    node.children.forEach(childId => dfs(childId, newPath));
+                } else {
+                    paths.push(newPath);
+                }
+            }
+
+            root.children.forEach(childId => dfs(childId, []));
+            return paths;
+        }
+
+        // ---------- 新增：生成分支示意图HTML（带折叠展开）----------
+        // 替换原有的 generateBranchDiagramHTML 函数
+        function generateBranchDiagramHTML(paths) {
+            if (!paths || paths.length === 0) return '<div class="branch-diagram">无对话分支</div>';
+
+            // 1. 对路径按节点 ID 序列排序，使公共前缀相邻
+            const sortedPaths = paths.slice().sort((a, b) => {
+                const strA = a.map(n => n.id).join('|');
+                const strB = b.map(n => n.id).join('|');
+                return strA.localeCompare(strB);
+            });
+
+            // 2. 标记每条路径中与前一条路径重复的前缀节点
+            const enhancedPaths = [];
+            for (let i = 0; i < sortedPaths.length; i++) {
+                const currentPath = sortedPaths[i];
+                const enhancedPath = currentPath.map(node => ({ ...node, duplicate: false }));
+                if (i > 0) {
+                    const prevPath = sortedPaths[i - 1];
+                    let commonLen = 0;
+                    while (commonLen < currentPath.length && commonLen < prevPath.length &&
+                           currentPath[commonLen].id === prevPath[commonLen].id) {
+                        commonLen++;
+                    }
+                    for (let j = 0; j < commonLen; j++) {
+                        enhancedPath[j].duplicate = true;
+                    }
+                }
+                enhancedPaths.push(enhancedPath);
+            }
+
+            // 3. 根据缩写获取背景色（与对应消息类型一致）
+            function getBgColor(abbr) {
+                if (abbr === '问') return '#e8f5e8';       // message-request
+                if (abbr === '思') return '#f8f9fa';       // message-think
+                if (abbr === '答' || abbr === '思答') return '#e3f2fd'; // message-response
+                return '#e3f2fd'; // 默认
+            }
+
+            // 4. 渲染增强后的路径（带 duplicate 标记）
+            function renderEnhancedPaths(pathSlice) {
+                return pathSlice.map(path => {
+                    const nodesHtml = path.map((node, idx) => {
+                        const arrow = idx < path.length - 1 ? '<span class="arrow">→</span>' : '';
+                        const bgColor = getBgColor(node.abbr);
+                        const duplicateClass = node.duplicate ? ' duplicate' : '';
+                        // 使用 escapeHTML 保证安全，背景色通过内联设置
+                        return `<span class="node-tag${duplicateClass}" style="background-color: ${bgColor};">${escapeHTML(node.id)} (${escapeHTML(node.abbr)})</span>${arrow}`;
+                    }).join('');
+                    return `<div class="path-row">${nodesHtml}</div>`;
+                }).join('');
+            }
+
+            const total = enhancedPaths.length;
+            const foldLimit = 4;
+            const foldedHtml = renderEnhancedPaths(enhancedPaths.slice(0, foldLimit));
+            const expandedHtml = renderEnhancedPaths(enhancedPaths);
+
+            let html = '<div class="branch-diagram" id="branchDiagramContainer">';
+            if (total <= foldLimit) {
+                html += `<div class="branch-folded">${foldedHtml}</div>`;
+            } else {
+                html += `<div class="branch-folded" id="branchFolded">${foldedHtml}</div>`;
+                html += `<div class="branch-expanded" id="branchExpanded" style="display:none;">${expandedHtml}</div>`;
+                html += `<button class="branch-toggle-btn" onclick="toggleBranchDiagram(this)">展开全部 (${total}行)</button>`;
+            }
+            html += '</div>';
+            return html;
+        }
+
+        // 全局切换函数
+        window.toggleBranchDiagram = function(btn) {
+            const container = btn.parentElement;
+            const foldedDiv = container.querySelector('#branchFolded') || container.querySelector('.branch-folded');
+            const expandedDiv = container.querySelector('#branchExpanded') || container.querySelector('.branch-expanded');
+            if (!foldedDiv || !expandedDiv) return;
+            if (expandedDiv.style.display === 'none') {
+                foldedDiv.style.display = 'none';
+                expandedDiv.style.display = 'block';
+                btn.textContent = '收起';
+            } else {
+                foldedDiv.style.display = 'block';
+                expandedDiv.style.display = 'none';
+                btn.textContent = `展开全部 (${conversationMap.get(currentConversationId) ? buildPathsFromMapping(conversationMap.get(currentConversationId).mapping).length : 0}行)`;
+            }
+        };
+
+        // 修改 renderConversation 加入分支示意图
+        function renderConversation(conversation) {
+            const insertedAt = formatDateTimeFull(conversation.inserted_at || conversation.created_at);
+            const updatedAt = formatDateTimeFull(conversation.updated_at || conversation.modified_at || conversation.inserted_at);
+            const title = conversation.title || conversation.name || '无标题对话';
+            const convId = conversation.id || '未知';
+            
+            let branchHtml = '';
+            if (conversation.mapping) {
+                const paths = buildPathsFromMapping(conversation.mapping);
+                branchHtml = generateBranchDiagramHTML(paths);
+            }
+
+            // 修改 renderConversation 函数中构建 contentHeader 的部分
+            // 将 content-meta 和 branchHtml 放入 Flex 容器左右并列
+            contentHeader.innerHTML = `
+                <h2>${escapeHTML(title)}</h2>
+                <div style="display: flex; gap: 24px; flex-wrap: wrap;"> <!-- 保留 flex-wrap 以适配小屏 -->
+                    <div class="content-meta" style="flex: 1 1 0; margin:0;">
+                        <div>创建时间: ${insertedAt}</div>
+                        <div>更新时间: ${updatedAt}</div>
+                        <div>ID: ${convId}</div>
+                    </div>
+                    <div style="flex: 2 1 0; min-width: 0;">  <!-- 原 branch 区域 -->
+                        ${branchHtml}
+                    </div>
+                    <div style="flex: 1 1 0;"></div>          <!-- 新增右侧空白占位 -->
+                </div>
+            `;
+            
+            messagesContainer.innerHTML = '';
+            
+            if (conversation.mapping) {
+                renderMappingMessages(conversation.mapping);
+            } else if (conversation.messages) {
+                renderSimpleMessages(conversation.messages);
+            } else if (conversation.content) {
+                renderContent(conversation);
+            } else {
+                messagesContainer.innerHTML = '<div class="empty-state"><h3>无消息内容</h3><p>此对话没有可显示的消息</p></div>';
+            }
+            
+            messagesContainer.scrollTop = 0;
+        }
+        
+        function renderMappingMessages(mapping) {
+            const messages = extractMessagesFromMapping(mapping);
+            
+            if (messages.length === 0) {
+                messagesContainer.innerHTML = '<div class="empty-state"><h3>无消息内容</h3><p>mapping结构中没有找到消息</p></div>';
+                return;
+            }
+            
+            messages.forEach(messageNode => {
+                if (messageNode.message) {
+                    // 传递节点ID
+                    const messageElement = createMessageElement(messageNode.message, messageNode.id);
+                    messagesContainer.appendChild(messageElement);
+                }
+            });
+        }
+        
         function renderSimpleMessages(messages) {
             messages.forEach(message => {
-                const messageElement = createMessageElement(message);
+                const messageElement = createMessageElement(message, null); // 无节点ID
                 messagesContainer.appendChild(messageElement);
             });
         }
@@ -772,11 +1067,22 @@
             messagesContainer.appendChild(messageDiv);
         }
         
-        // 创建消息元素
-        function createMessageElement(message) {
+        // 修改 createMessageElement 接受 nodeId
+        function createMessageElement(message, nodeId = null) {
+            // 如果消息有多个fragment，分别为每个fragment创建消息元素
+            if (message.fragments && message.fragments.length > 1) {
+                const container = document.createDocumentFragment();
+                for (const fragment of message.fragments) {
+                    const fragMessage = { ...message, fragments: [fragment] };
+                    const elem = createMessageElement(fragMessage, nodeId); // 同一个nodeId传给每个fragment
+                    container.appendChild(elem);
+                }
+                return container;
+            }
+            
+            // 以下是原来的单消息逻辑（适用于没有fragments或fragments长度为1的情况）
             const messageDiv = document.createElement('div');
             
-            // 确定消息类型和样式
             let messageType = 'unknown';
             let messageClass = 'message';
             
@@ -795,15 +1101,14 @@
                 messageClass = `message message-${messageType}`;
             }
             
-            // 时间格式化
             const messageTime = message.inserted_at || message.created_at || message.timestamp || '';
             
-            // 构建消息内容
             let messageContent = '';
             
             if (message.content) {
                 messageContent = message.content;
             } else if (message.fragments) {
+                // 这里fragments长度应该是1，但为了通用，仍然循环拼接
                 message.fragments.forEach(fragment => {
                     if (fragment.content) {
                         messageContent += fragment.content + '\n\n';
@@ -813,7 +1118,6 @@
                 messageContent = message.text;
             }
             
-            // 文件信息
             let filesInfo = '';
             if (message.files && message.files.length > 0) {
                 filesInfo = '<div class="message-files"><strong>文件:</strong><br>';
@@ -828,16 +1132,18 @@
                 filesInfo += '</div>';
             }
             
-            // 元数据
             let metadata = '';
             if (message.metadata) {
                 metadata = `<div class="message-files"><strong>元数据:</strong><br><pre>${JSON.stringify(message.metadata, null, 2)}</pre></div>`;
             }
             
             messageDiv.className = messageClass;
+            // 在message-type右边添加message-id（如果存在）
+            const typeSpan = `<span class="message-type">${messageType.toUpperCase()}</span>`;
+            const idSpan = nodeId ? `<span class="message-id">${nodeId}</span>` : '';
             messageDiv.innerHTML = `
                 <div class="message-header">
-                    <span class="message-type">${messageType.toUpperCase()}</span>
+                    ${typeSpan}${idSpan}
                     <span class="message-time">${formatDateTimeFull(messageTime)}</span>
                 </div>
                 <div class="message-content">${escapeHTML(messageContent.trim())}</div>
@@ -851,17 +1157,12 @@
         // 工具函数
         function formatDateTime(dateString) {
             if (!dateString) return '未知时间';
-            
             try {
                 const date = new Date(dateString);
                 if (isNaN(date.getTime())) return dateString;
-                
                 return date.toLocaleString('zh-CN', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit'
                 });
             } catch (e) {
                 return dateString;
@@ -870,18 +1171,12 @@
         
         function formatDateTimeFull(dateString) {
             if (!dateString) return '未知时间';
-            
             try {
                 const date = new Date(dateString);
                 if (isNaN(date.getTime())) return dateString;
-                
                 return date.toLocaleString('zh-CN', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
                 });
             } catch (e) {
                 return dateString;
@@ -904,7 +1199,7 @@
             messagesContainer.innerHTML = '<div class="empty-state"><h3>错误</h3><p>无法加载对话内容</p></div>';
         }
         
-        // 示例：拖放上传支持
+        // 拖放上传支持
         document.addEventListener('DOMContentLoaded', function() {
             const uploadBox = document.querySelector('.upload-box');
             
@@ -926,12 +1221,9 @@
                 if (files.length > 0) {
                     const file = files[0];
                     if (file.name.endsWith('.json')) {
-                        // 模拟文件输入
                         const dataTransfer = new DataTransfer();
                         dataTransfer.items.add(file);
                         fileInput.files = dataTransfer.files;
-                        
-                        // 触发change事件
                         const event = new Event('change', { bubbles: true });
                         fileInput.dispatchEvent(event);
                     } else {
