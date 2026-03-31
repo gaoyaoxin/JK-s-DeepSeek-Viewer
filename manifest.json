@@ -1,0 +1,12 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "JK的DeepSeek会话历史查看器",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "JK会话历史查看器",
+  "start_url": "/",
+  "theme_color": "#ffffff",
+  "id": "01"
+}
