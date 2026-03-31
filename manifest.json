@@ -6,11 +6,11 @@
   "orientation": "any",
   "scope": "/",
   "short_name": "JK的DeepSeek查看器",
-  "start_url": "/index.html",
+  "start_url": "/JK-s-DeepSeek-Viewer/index.html",
   "theme_color": "#ffffff",
   "icons": [
   {
-    "src": "/favicon-512x512.png",
+    "src": "/JK-s-DeepSeek-Viewer/favicon-512x512.png",
     "sizes": "512x512",
     "type": "image/png"
   }
