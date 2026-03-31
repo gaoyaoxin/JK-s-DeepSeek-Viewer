@@ -5,8 +5,7 @@
   "name": "JK的DeepSeek会话历史查看器",
   "orientation": "any",
   "scope": "/",
-  "short_name": "JK会话历史查看器",
-  "start_url": "/",
-  "theme_color": "#ffffff",
-  "id": "01"
+  "short_name": "JK的DeepSeek查看器",
+  "start_url": "/index.html",
+  "theme_color": "#ffffff"
 }
